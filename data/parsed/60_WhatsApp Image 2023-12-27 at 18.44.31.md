@@ -1,0 +1,1 @@
+![A photograph showing a group of women and a man sitting in a room for a seminar. On the wall, there is a poster that reads: "كيان ندوة حقوق الأشخاص ذوي الإعاقة" (Kayan Seminar on the Rights of Persons with Disabilities). There is also a small whiteboard on an easel in the center of the room.](page_1_image_1_v2.jpg)

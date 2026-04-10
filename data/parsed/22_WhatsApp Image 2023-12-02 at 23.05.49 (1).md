@@ -1,0 +1,1 @@
+![A woman wearing a brown hijab and a black dress is kneeling on a floral patterned rug, tending to a young boy lying on his back. Another child and an adult are partially visible in the background.](page_1_image_1_v2.jpg)

@@ -1,0 +1,1 @@
+![A group of people, mostly women wearing hijabs, sitting in a classroom-like setting with colorful educational decorations on the walls.](image)

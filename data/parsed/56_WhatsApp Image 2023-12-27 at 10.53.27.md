@@ -1,0 +1,1 @@
+![A classroom scene showing students sitting at wooden desks, facing a whiteboard with Arabic writing. The photo is taken from an elevated angle behind the students.](page_1_image_1_v2.jpg)

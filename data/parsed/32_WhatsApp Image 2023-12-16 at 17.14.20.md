@@ -1,0 +1,1 @@
+![A street scene showing a blue food stall or kiosk with several children standing in front of it. The stall has stacks of bread or pastries on the left side. The ground is a dirt or paved street with some litter. In the foreground, a woman in a blue headscarf and a young girl in a pink sweater are visible.](page_1_image_1_v2.jpg)

@@ -1,0 +1,1 @@
+![A man standing and speaking to a group of seated women, mostly wearing niqabs, in a room. A banner on the wall behind him features Arabic text and logos.](page_1_image_1_v2.jpg)
