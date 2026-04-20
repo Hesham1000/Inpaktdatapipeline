@@ -33,7 +33,6 @@ def download_drive_folder():
             url=DRIVE_URL,
             output=str(RAW_DIR),
             quiet=False,
-            remaining_ok=True,
         )
         print(f"\n[download] First pass complete.")
     except Exception as e:
@@ -60,13 +59,12 @@ def _retry_failed_subfolders():
     for marker in marker_files:
         folder_id = marker.read_text().strip()
         target_dir = marker.parent
-        print(f"  [retry] Downloading subfolder {folder_id} → {target_dir}")
+        print(f"  [retry] Downloading subfolder {folder_id} -> {target_dir}")
         try:
             gdown.download_folder(
                 id=folder_id,
                 output=str(target_dir),
                 quiet=False,
-                remaining_ok=True,
             )
         except Exception as e:
             print(f"  [warn] Failed to download subfolder: {e}")
