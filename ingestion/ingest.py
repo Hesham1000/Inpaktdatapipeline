@@ -1,6 +1,7 @@
 """Ingestion module — discovers, validates, and registers documents."""
 
 import os
+import sys
 from pathlib import Path
 from tqdm import tqdm
 from config.settings import RAW_DIR, SUPPORTED_EXTENSIONS
@@ -9,14 +10,43 @@ from storage.database import (
 )
 from storage.file_store import store_raw_file
 
+# Add project root so scripts module is importable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+def _fix_tmp_if_needed(filepath: Path) -> Path:
+    """If a file has .tmp extension, detect real type and rename it."""
+    if filepath.suffix.lower() != ".tmp":
+        return filepath
+
+    try:
+        from scripts.fix_tmp_extensions import detect_file_type
+        real_ext = detect_file_type(filepath)
+        if real_ext and real_ext != ".tmp":
+            new_path = filepath.with_suffix(real_ext)
+            counter = 1
+            while new_path.exists():
+                new_path = filepath.with_stem(f"{filepath.stem}_{counter}").with_suffix(real_ext)
+                counter += 1
+            filepath.rename(new_path)
+            print(f"  [fix-tmp] {filepath.name} → {new_path.name}")
+            return new_path
+    except ImportError:
+        pass
+
+    return filepath
+
 
 def discover_files(source_dir: str | Path | None = None) -> list[Path]:
-    """Find all supported files in a directory (defaults to data/raw)."""
+    """Find all supported files in a directory (defaults to data/raw).
+    Also picks up .tmp files so they can be auto-detected during ingestion."""
     scan_dir = Path(source_dir) if source_dir else RAW_DIR
     files = []
     for f in scan_dir.rglob("*"):
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
-            files.append(f)
+        if f.is_file():
+            ext = f.suffix.lower()
+            if ext in SUPPORTED_EXTENSIONS or ext == ".tmp":
+                files.append(f)
     return sorted(files)
 
 
@@ -46,6 +76,14 @@ def ingest_directory(source_dir: str | Path | None = None,
     new_doc_ids = []
 
     for filepath in tqdm(files, desc="Ingesting"):
+        # Auto-fix .tmp files by detecting real type and renaming
+        filepath = _fix_tmp_if_needed(filepath)
+
+        # After rename, skip if extension is still unsupported
+        if filepath.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            print(f"  [skip] Unsupported type: {filepath.name}")
+            continue
+
         sha = file_hash(str(filepath))
 
         if document_exists(sha):

@@ -2,6 +2,7 @@
 
 import sqlite3
 import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -29,9 +30,13 @@ def init_db() -> None:
             sha256      TEXT NOT NULL,
             language    TEXT DEFAULT 'ar+en',
             sdg_tags    TEXT DEFAULT '',
+            doc_type    TEXT DEFAULT '',
+            doc_type_confidence REAL DEFAULT 0.0,
+            doc_type_reasoning  TEXT DEFAULT '',
             status      TEXT DEFAULT 'ingested'
-                        CHECK(status IN ('ingested','parsing','parsed','chunked',
-                                         'embedded','exported','error')),
+                        CHECK(status IN ('ingested','classifying','classified',
+                                         'parsing','parsed','extracting','extracted',
+                                         'chunked','embedded','exported','error')),
             error_msg   TEXT DEFAULT '',
             created_at  TEXT DEFAULT (datetime('now')),
             updated_at  TEXT DEFAULT (datetime('now'))
@@ -58,11 +63,53 @@ def init_db() -> None:
             created_at  TEXT DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS extraction_results (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            doc_id      INTEGER NOT NULL REFERENCES documents(id),
+            schema_name TEXT DEFAULT 'sdg_project',
+            data        TEXT NOT NULL DEFAULT '{}',
+            status      TEXT DEFAULT 'pending',
+            error_msg   TEXT DEFAULT '',
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS sheet_regions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            doc_id      INTEGER NOT NULL REFERENCES documents(id),
+            region_id   TEXT NOT NULL,
+            sheet_name  TEXT DEFAULT '',
+            location    TEXT DEFAULT '',
+            title       TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            markdown    TEXT DEFAULT '',
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
+        CREATE INDEX IF NOT EXISTS idx_documents_doc_type ON documents(doc_type);
         CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
         CREATE INDEX IF NOT EXISTS idx_qa_doc ON qa_pairs(doc_id);
+        CREATE INDEX IF NOT EXISTS idx_extraction_doc ON extraction_results(doc_id);
+        CREATE INDEX IF NOT EXISTS idx_sheet_regions_doc ON sheet_regions(doc_id);
     """)
+
+    # Migration: add columns if upgrading from old schema
+    _migrate_columns(conn)
     conn.close()
+
+
+def _migrate_columns(conn: sqlite3.Connection) -> None:
+    """Add new columns to existing tables if they don't exist."""
+    migrations = [
+        "ALTER TABLE documents ADD COLUMN doc_type TEXT DEFAULT ''",
+        "ALTER TABLE documents ADD COLUMN doc_type_confidence REAL DEFAULT 0.0",
+        "ALTER TABLE documents ADD COLUMN doc_type_reasoning TEXT DEFAULT ''",
+    ]
+    for sql in migrations:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
 
 def file_hash(filepath: str) -> str:
@@ -98,6 +145,77 @@ def update_status(doc_id: int, status: str, error_msg: str = "") -> None:
     )
     conn.commit()
     conn.close()
+
+
+def update_doc_classification(doc_id: int, doc_type: str,
+                              confidence: float, reasoning: str) -> None:
+    """Store classification results for a document."""
+    conn = _get_conn()
+    conn.execute(
+        """UPDATE documents SET doc_type=?, doc_type_confidence=?,
+           doc_type_reasoning=?, updated_at=datetime('now') WHERE id=?""",
+        (doc_type, confidence, reasoning, doc_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def insert_extraction_result(doc_id: int, data: dict,
+                             schema_name: str = "sdg_project",
+                             status: str = "completed",
+                             error_msg: str = "") -> int:
+    """Store structured extraction results for a document."""
+    conn = _get_conn()
+    cur = conn.execute(
+        """INSERT INTO extraction_results (doc_id, schema_name, data, status, error_msg)
+           VALUES (?, ?, ?, ?, ?)""",
+        (doc_id, schema_name, json.dumps(data, ensure_ascii=False), status, error_msg),
+    )
+    result_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return result_id
+
+
+def get_extraction_results(doc_id: int) -> list[dict]:
+    """Get extraction results for a document."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM extraction_results WHERE doc_id=? ORDER BY id", (doc_id,)
+    ).fetchall()
+    conn.close()
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["data"] = json.loads(d["data"]) if d["data"] else {}
+        results.append(d)
+    return results
+
+
+def insert_sheet_region(doc_id: int, region_id: str, sheet_name: str,
+                        location: str, title: str, description: str,
+                        markdown: str) -> int:
+    """Store a sheet region for a document."""
+    conn = _get_conn()
+    cur = conn.execute(
+        """INSERT INTO sheet_regions
+           (doc_id, region_id, sheet_name, location, title, description, markdown)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (doc_id, region_id, sheet_name, location, title, description, markdown),
+    )
+    region_db_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return region_db_id
+
+
+def get_sheet_regions(doc_id: int) -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM sheet_regions WHERE doc_id=? ORDER BY id", (doc_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def get_documents_by_status(status: str) -> list[dict]:
@@ -166,7 +284,9 @@ def get_all_qa_pairs() -> list[dict]:
 def get_pipeline_stats() -> dict:
     conn = _get_conn()
     stats = {}
-    for status in ("ingested", "parsing", "parsed", "chunked", "embedded", "exported", "error"):
+    for status in ("ingested", "classifying", "classified", "parsing",
+                    "parsed", "extracting", "extracted", "chunked",
+                    "embedded", "exported", "error"):
         row = conn.execute(
             "SELECT COUNT(*) as cnt FROM documents WHERE status=?", (status,)
         ).fetchone()
@@ -175,5 +295,9 @@ def get_pipeline_stats() -> dict:
     stats["total_chunks"] = row["cnt"]
     row = conn.execute("SELECT COUNT(*) as cnt FROM qa_pairs").fetchone()
     stats["total_qa_pairs"] = row["cnt"]
+    row = conn.execute("SELECT COUNT(*) as cnt FROM extraction_results").fetchone()
+    stats["total_extractions"] = row["cnt"]
+    row = conn.execute("SELECT COUNT(*) as cnt FROM sheet_regions").fetchone()
+    stats["total_sheet_regions"] = row["cnt"]
     conn.close()
     return stats
