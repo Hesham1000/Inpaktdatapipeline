@@ -1,18 +1,21 @@
 """
 Kayan SDG Data Pipeline — CLI Orchestrator
 ============================================
-Full pipeline: Ingest → Parse → Chunk → QA Generate → Embed → Export
+Full pipeline: Ingest -> Classify -> Parse/Sheets -> Extract -> Chunk -> QA -> Embed -> Export
 
 Usage:
     python main.py run                    # Run full pipeline
     python main.py ingest [--source DIR]  # Ingest files only
-    python main.py parse                  # Parse ingested docs
+    python main.py classify               # Classify ingested docs by type
+    python main.py parse                  # Classify + Parse + Sheets + Extract
+    python main.py extract                # Extract structured data from parsed docs
     python main.py chunk                  # Chunk parsed docs
     python main.py qa                     # Generate QA pairs
     python main.py embed                  # Generate embeddings + FAISS
     python main.py export                 # Export training data
     python main.py status                 # Show pipeline stats
     python main.py search "query"         # Test RAG search
+    python main.py reparse                # Retry errored documents
 """
 
 import sys
@@ -25,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config.settings import (
     RAW_DIR, PARSED_DIR, RAG_DIR, FINETUNE_DIR, LLAMA_CLOUD_API_KEY,
+    ENABLE_CLASSIFICATION, ENABLE_EXTRACTION, ENABLE_SHEETS,
 )
 from storage.database import init_db, get_pipeline_stats
 
@@ -33,69 +37,114 @@ def cmd_status():
     """Show current pipeline statistics."""
     init_db()
     stats = get_pipeline_stats()
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 55)
     print("  KAYAN SDG DATA PIPELINE — STATUS")
-    print("=" * 50)
-    print(f"  Documents ingested:    {stats.get('ingested', 0)}")
-    print(f"  Documents parsing:     {stats.get('parsing', 0)}")
-    print(f"  Documents parsed:      {stats.get('parsed', 0)}")
-    print(f"  Documents chunked:     {stats.get('chunked', 0)}")
-    print(f"  Documents embedded:    {stats.get('embedded', 0)}")
-    print(f"  Documents exported:    {stats.get('exported', 0)}")
-    print(f"  Documents with errors: {stats.get('error', 0)}")
-    print(f"  ─────────────────────────────────")
-    print(f"  Total chunks:          {stats.get('total_chunks', 0)}")
-    print(f"  Total QA pairs:        {stats.get('total_qa_pairs', 0)}")
-    print("=" * 50 + "\n")
+    print("=" * 55)
+    print(f"  Documents ingested:     {stats.get('ingested', 0)}")
+    print(f"  Documents classifying:  {stats.get('classifying', 0)}")
+    print(f"  Documents classified:   {stats.get('classified', 0)}")
+    print(f"  Documents parsing:      {stats.get('parsing', 0)}")
+    print(f"  Documents parsed:       {stats.get('parsed', 0)}")
+    print(f"  Documents extracting:   {stats.get('extracting', 0)}")
+    print(f"  Documents extracted:    {stats.get('extracted', 0)}")
+    print(f"  Documents chunked:      {stats.get('chunked', 0)}")
+    print(f"  Documents embedded:     {stats.get('embedded', 0)}")
+    print(f"  Documents exported:     {stats.get('exported', 0)}")
+    print(f"  Documents with errors:  {stats.get('error', 0)}")
+    print(f"  ---")
+    print(f"  Total chunks:           {stats.get('total_chunks', 0)}")
+    print(f"  Total QA pairs:         {stats.get('total_qa_pairs', 0)}")
+    print(f"  Total extractions:      {stats.get('total_extractions', 0)}")
+    print(f"  Total sheet regions:    {stats.get('total_sheet_regions', 0)}")
+    print(f"  ---")
+    print(f"  Features: Classify={'ON' if ENABLE_CLASSIFICATION else 'OFF'} | "
+          f"Extract={'ON' if ENABLE_EXTRACTION else 'OFF'} | "
+          f"Sheets={'ON' if ENABLE_SHEETS else 'OFF'}")
+    print("=" * 55 + "\n")
 
 
 def cmd_ingest(source_dir=None, copy=False):
     from ingestion.ingest import ingest_directory
     init_db()
     doc_ids = ingest_directory(source_dir=source_dir, copy_to_raw=copy)
-    print(f"\n✓ Ingested {len(doc_ids)} new documents")
+    print(f"\n-> Ingested {len(doc_ids)} new documents")
     return doc_ids
+
+
+def cmd_classify():
+    from parsing.parser import classify_only
+    init_db()
+    count = classify_only()
+    print(f"\n-> Classified {count} documents")
+    return count
 
 
 def cmd_parse():
     from parsing.parser import parse_documents
     if not LLAMA_CLOUD_API_KEY:
-        print("✗ Error: Set LLAMA_CLOUD_API_KEY in .env file")
+        print("Error: Set LLAMA_CLOUD_API_KEY in .env file")
         print("  Get one at: https://cloud.llamaindex.ai")
         sys.exit(1)
+    init_db()
     count = parse_documents()
-    print(f"\n✓ Parsed {count} documents")
+    print(f"\n-> Processed {count} documents (Classify + Parse + Extract)")
+    return count
+
+
+def cmd_extract():
+    from parsing.parser import extract_only
+    if not LLAMA_CLOUD_API_KEY:
+        print("Error: Set LLAMA_CLOUD_API_KEY in .env file")
+        sys.exit(1)
+    init_db()
+    count = extract_only()
+    print(f"\n-> Extracted {count} documents")
     return count
 
 
 def cmd_chunk():
     from transformation.chunker import chunk_documents
+    init_db()
     count = chunk_documents()
-    print(f"\n✓ Created {count} chunks")
+    print(f"\n-> Created {count} chunks")
     return count
 
 
 def cmd_qa():
     from transformation.qa_generator import generate_qa_pairs
+    init_db()
     count = generate_qa_pairs()
-    print(f"\n✓ Generated {count} QA pairs")
+    print(f"\n-> Generated {count} QA pairs")
     return count
 
 
 def cmd_embed():
     from transformation.embeddings import generate_embeddings
+    init_db()
     count = generate_embeddings()
-    print(f"\n✓ Generated {count} embeddings")
+    print(f"\n-> Generated {count} embeddings")
     return count
 
 
 def cmd_export():
     from export.exporter import export_all
+    init_db()
     paths = export_all()
-    print(f"\n✓ Exports complete:")
+    print(f"\n-> Exports complete:")
     print(f"  Fine-tuning: {paths['finetune_jsonl']}")
     print(f"  RAG assets:  {paths['rag_directory']}")
     return paths
+
+
+def cmd_reparse():
+    from parsing.parser import reparse_errors
+    if not LLAMA_CLOUD_API_KEY:
+        print("Error: Set LLAMA_CLOUD_API_KEY in .env file")
+        sys.exit(1)
+    init_db()
+    count = reparse_errors()
+    print(f"\n-> Reprocessed {count} documents")
+    return count
 
 
 def cmd_search(query, top_k=5):
@@ -111,45 +160,57 @@ def cmd_search(query, top_k=5):
 
 def cmd_run(source_dir=None):
     """Run the full pipeline end-to-end."""
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 55)
     print("  KAYAN SDG DATA PIPELINE — FULL RUN")
-    print("=" * 50 + "\n")
+    print("=" * 55)
+
+    features = []
+    if ENABLE_CLASSIFICATION:
+        features.append("Classify")
+    features.append("Parse")
+    if ENABLE_SHEETS:
+        features.append("Sheets")
+    if ENABLE_EXTRACTION:
+        features.append("Extract")
+
+    print(f"  Features: {' + '.join(features)}")
+    print("=" * 55 + "\n")
     start = time.time()
 
-    print("STEP 1/6: Ingesting documents...")
+    print("STEP 1/7: Ingesting documents...")
     print("-" * 40)
     cmd_ingest(source_dir=source_dir)
 
-    print("\nSTEP 2/6: Parsing with LlamaParse...")
+    print("\nSTEP 2/7: Classify + Parse + Sheets + Extract...")
     print("-" * 40)
     cmd_parse()
 
-    print("\nSTEP 3/6: Chunking for RAG...")
+    print("\nSTEP 3/7: Chunking for RAG...")
     print("-" * 40)
     cmd_chunk()
 
-    print("\nSTEP 4/6: Generating QA pairs for fine-tuning...")
+    print("\nSTEP 4/7: Generating QA pairs for fine-tuning...")
     print("-" * 40)
     cmd_qa()
 
-    print("\nSTEP 5/6: Generating embeddings + FAISS index...")
+    print("\nSTEP 5/7: Generating embeddings + FAISS index...")
     print("-" * 40)
     cmd_embed()
 
-    print("\nSTEP 6/6: Exporting training data...")
+    print("\nSTEP 6/7: Exporting training data...")
     print("-" * 40)
     cmd_export()
 
     elapsed = time.time() - start
-    print(f"\n{'=' * 50}")
+    print(f"\n{'=' * 55}")
     print(f"  PIPELINE COMPLETE in {elapsed:.1f}s")
-    print(f"{'=' * 50}")
+    print(f"{'=' * 55}")
     cmd_status()
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Kayan SDG Data Pipeline — Ingest, Parse, Transform, Export",
+        description="Kayan SDG Data Pipeline — Ingest, Classify, Parse, Extract, Transform, Export",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -165,12 +226,15 @@ def main():
     p_ingest.add_argument("--copy", action="store_true", help="Copy files to data/raw")
 
     # individual stages
-    sub.add_parser("parse", help="Parse ingested documents via LlamaParse")
+    sub.add_parser("classify", help="Classify ingested documents by type")
+    sub.add_parser("parse", help="Full processing: Classify + Parse/Sheets + Extract")
+    sub.add_parser("extract", help="Extract structured data from parsed documents")
     sub.add_parser("chunk", help="Chunk parsed documents for RAG")
     sub.add_parser("qa", help="Generate QA pairs for fine-tuning")
     sub.add_parser("embed", help="Generate embeddings + build FAISS index")
     sub.add_parser("export", help="Export training data (JSONL + RAG bundle)")
     sub.add_parser("status", help="Show pipeline statistics")
+    sub.add_parser("reparse", help="Retry processing errored documents")
 
     # search
     p_search = sub.add_parser("search", help="Test RAG search")
@@ -184,15 +248,18 @@ def main():
         sys.exit(0)
 
     commands = {
-        "run":    lambda: cmd_run(source_dir=args.source if hasattr(args, 'source') else None),
-        "ingest": lambda: cmd_ingest(source_dir=args.source, copy=args.copy),
-        "parse":  cmd_parse,
-        "chunk":  cmd_chunk,
-        "qa":     cmd_qa,
-        "embed":  cmd_embed,
-        "export": cmd_export,
-        "status": cmd_status,
-        "search": lambda: cmd_search(args.query, top_k=args.k),
+        "run":      lambda: cmd_run(source_dir=args.source if hasattr(args, 'source') else None),
+        "ingest":   lambda: cmd_ingest(source_dir=args.source, copy=args.copy),
+        "classify": cmd_classify,
+        "parse":    cmd_parse,
+        "extract":  cmd_extract,
+        "chunk":    cmd_chunk,
+        "qa":       cmd_qa,
+        "embed":    cmd_embed,
+        "export":   cmd_export,
+        "status":   cmd_status,
+        "reparse":  cmd_reparse,
+        "search":   lambda: cmd_search(args.query, top_k=args.k),
     }
 
     commands[args.command]()
