@@ -12,3 +12,4 @@ chardet>=5.0.0
 tqdm>=4.65.0
 httpx>=0.24.0
 tiktoken>=0.5.0
+gdown>=5.1.0
