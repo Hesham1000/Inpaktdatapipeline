@@ -49,6 +49,7 @@ async def _parse_single(client: AsyncLlamaCloud, doc: dict) -> str:
             "ocr_parameters": {"languages": OCR_LANGUAGES},
         },
         expand=["markdown", "text"],
+        timeout=900.0,
     )
 
     pages = result.markdown.pages if result.markdown else []
@@ -181,7 +182,10 @@ async def _process_document(client: AsyncLlamaCloud, doc: dict) -> bool:
     update_status(doc_id, "parsed")
 
     # ── Step 3: Extract structured data ──
-    if ENABLE_EXTRACTION and not is_image:
+    # Extract API only supports: .pdf, .docx, .pptx, .xlsx, .csv, .txt, .html
+    extract_unsupported = {".doc", ".ppt", ".xls", ".rtf"}
+    can_extract = filetype not in extract_unsupported and not is_image
+    if ENABLE_EXTRACTION and can_extract:
         update_status(doc_id, "extracting")
         try:
             extract_data = await _extract_single(client, doc)
@@ -221,7 +225,11 @@ async def _process_document(client: AsyncLlamaCloud, doc: dict) -> bool:
 
 async def _process_batch(docs: list[dict]) -> int:
     """Process a batch of documents through the full pipeline."""
-    client = AsyncLlamaCloud(api_key=LLAMA_CLOUD_API_KEY)
+    import httpx
+    client = AsyncLlamaCloud(
+        api_key=LLAMA_CLOUD_API_KEY,
+        timeout=httpx.Timeout(600.0, connect=60.0),
+    )
     success_count = 0
 
     for doc in tqdm(docs, desc="Processing documents"):

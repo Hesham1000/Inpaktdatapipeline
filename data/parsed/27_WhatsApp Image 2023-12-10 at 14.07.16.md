@@ -1,1 +1,0 @@
-![A man in a grey and maroon Adidas tracksuit holding a white duck, while a young boy in a white sweater and a woman in a purple hijab look on. They are standing in an outdoor market area with bird cages in the background.](page_1_image_1_v2.jpg)

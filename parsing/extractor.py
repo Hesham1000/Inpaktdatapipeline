@@ -4,8 +4,7 @@ Extracts SDG project metadata (project name, goals, beneficiaries, etc.)
 from parsed documents into structured JSON.
 """
 
-import asyncio
-import time
+import httpx
 from llama_cloud import AsyncLlamaCloud
 from config.settings import LLAMA_CLOUD_API_KEY, EXTRACTION_SCHEMA
 
@@ -13,8 +12,7 @@ from config.settings import LLAMA_CLOUD_API_KEY, EXTRACTION_SCHEMA
 async def extract_document(client: AsyncLlamaCloud,
                            filepath: str,
                            schema: dict | None = None,
-                           poll_interval: float = 3.0,
-                           max_wait: float = 300.0) -> dict | None:
+                           timeout: float = 600.0) -> dict | None:
     """
     Extract structured data from a single document using LlamaExtract.
 
@@ -22,8 +20,7 @@ async def extract_document(client: AsyncLlamaCloud,
         client: AsyncLlamaCloud client.
         filepath: Path to the document file.
         schema: JSON schema for extraction (defaults to SDG project schema).
-        poll_interval: Seconds between status polls.
-        max_wait: Maximum seconds to wait for extraction.
+        timeout: Maximum seconds to wait for extraction.
 
     Returns:
         Extracted data dict, or None on failure.
@@ -42,17 +39,12 @@ async def extract_document(client: AsyncLlamaCloud,
             },
         )
 
-        # Poll for completion
-        elapsed = 0.0
-        while elapsed < max_wait:
-            job = await client.extract.get(job.id)
-            if job.status in ("COMPLETED", "FAILED", "CANCELLED"):
-                break
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
+        # Use SDK built-in polling
+        job = await client.extract.wait_for_completion(
+            job.id, timeout=timeout
+        )
 
-        if job.status == "COMPLETED" and job.extract_result:
-            # extract_result can be a list or dict
+        if job.extract_result:
             result = job.extract_result
             if isinstance(result, list) and len(result) > 0:
                 return result[0] if isinstance(result[0], dict) else {"data": result}
@@ -61,10 +53,8 @@ async def extract_document(client: AsyncLlamaCloud,
             else:
                 return {"raw_result": str(result)}
 
-        if job.status == "FAILED":
-            print(f"    [extract-warn] Extraction failed for job {job.id}")
-        elif elapsed >= max_wait:
-            print(f"    [extract-warn] Extraction timed out after {max_wait}s")
+        if hasattr(job, 'error_message') and job.error_message:
+            print(f"    [extract-warn] Extraction failed: {job.error_message}")
 
         return None
 
@@ -76,8 +66,7 @@ async def extract_document(client: AsyncLlamaCloud,
 async def extract_from_parse_job(client: AsyncLlamaCloud,
                                  parse_job_id: str,
                                  schema: dict | None = None,
-                                 poll_interval: float = 3.0,
-                                 max_wait: float = 300.0) -> dict | None:
+                                 timeout: float = 600.0) -> dict | None:
     """
     Extract structured data using an existing parse job ID.
     This avoids re-uploading and re-parsing the document.
@@ -94,15 +83,11 @@ async def extract_from_parse_job(client: AsyncLlamaCloud,
             },
         )
 
-        elapsed = 0.0
-        while elapsed < max_wait:
-            job = await client.extract.get(job.id)
-            if job.status in ("COMPLETED", "FAILED", "CANCELLED"):
-                break
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
+        job = await client.extract.wait_for_completion(
+            job.id, timeout=timeout
+        )
 
-        if job.status == "COMPLETED" and job.extract_result:
+        if job.extract_result:
             result = job.extract_result
             if isinstance(result, list) and len(result) > 0:
                 return result[0] if isinstance(result[0], dict) else {"data": result}
@@ -125,7 +110,10 @@ async def extract_batch(docs: list[dict],
 
     Returns dict mapping doc_id -> extracted data.
     """
-    client = AsyncLlamaCloud(api_key=LLAMA_CLOUD_API_KEY)
+    client = AsyncLlamaCloud(
+        api_key=LLAMA_CLOUD_API_KEY,
+        timeout=httpx.Timeout(600.0, connect=60.0),
+    )
     results = {}
 
     for doc in docs:

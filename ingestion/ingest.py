@@ -37,13 +37,20 @@ def _fix_tmp_if_needed(filepath: Path) -> Path:
     return filepath
 
 
+def _is_temp_file(filepath: Path) -> bool:
+    """Check if a file is a Word temp/lock file that should be skipped."""
+    name = filepath.name
+    return name.startswith("~$") or name.startswith("~WRL") or name.startswith("_WRL")
+
+
 def discover_files(source_dir: str | Path | None = None) -> list[Path]:
     """Find all supported files in a directory (defaults to data/raw).
-    Also picks up .tmp files so they can be auto-detected during ingestion."""
+    Also picks up .tmp files so they can be auto-detected during ingestion.
+    Skips Word temp/lock files (~$, ~WRL, _WRL)."""
     scan_dir = Path(source_dir) if source_dir else RAW_DIR
     files = []
     for f in scan_dir.rglob("*"):
-        if f.is_file():
+        if f.is_file() and not _is_temp_file(f):
             ext = f.suffix.lower()
             if ext in SUPPORTED_EXTENSIONS or ext == ".tmp":
                 files.append(f)

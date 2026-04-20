@@ -5,6 +5,7 @@ to enable type-specific parsing and extraction strategies.
 """
 
 import asyncio
+import httpx
 from llama_cloud import AsyncLlamaCloud
 from config.settings import LLAMA_CLOUD_API_KEY, CLASSIFY_RULES
 
@@ -26,10 +27,11 @@ async def classify_document(client: AsyncLlamaCloud,
             file_ids=[file_obj.id],
             rules=classify_rules,
             parsing_configuration={
-                "lang": "ar,en",
+                "lang": "ar",
                 "max_pages": 5,
             },
             mode="FAST",
+            timeout=600.0,
         )
 
         if result.items and len(result.items) > 0:
@@ -60,7 +62,10 @@ async def classify_batch(docs: list[dict],
     Returns:
         Dict mapping doc_id -> classification result.
     """
-    client = AsyncLlamaCloud(api_key=LLAMA_CLOUD_API_KEY)
+    client = AsyncLlamaCloud(
+        api_key=LLAMA_CLOUD_API_KEY,
+        timeout=httpx.Timeout(600.0, connect=60.0),
+    )
     results = {}
 
     for doc in docs:

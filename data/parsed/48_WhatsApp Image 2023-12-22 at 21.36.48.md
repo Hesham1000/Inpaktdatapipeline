@@ -1,1 +1,0 @@
-![A photograph of people inside a clothing store. Several individuals are looking at garments displayed on racks and shelves. The clothing includes jackets, hoodies, and sweaters in various colors like lime green, brown, and navy blue. One person in the foreground is wearing a blue denim jacket with a tan patch on the back.](page_1_image_1_v2.jpg)

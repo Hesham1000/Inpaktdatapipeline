@@ -6,6 +6,7 @@ converts them to markdown for downstream compatibility.
 
 import asyncio
 import io
+import httpx
 from pathlib import Path
 from llama_cloud import AsyncLlamaCloud
 from config.settings import LLAMA_CLOUD_API_KEY
@@ -30,6 +31,7 @@ async def parse_sheet(client: AsyncLlamaCloud,
             config={
                 "generate_additional_metadata": generate_metadata,
             },
+            timeout=600.0,
         )
 
         if not result or not result.regions:
@@ -153,7 +155,10 @@ async def parse_sheet_batch(docs: list[dict]) -> dict[int, dict]:
 
     Returns dict mapping doc_id -> sheets result.
     """
-    client = AsyncLlamaCloud(api_key=LLAMA_CLOUD_API_KEY)
+    client = AsyncLlamaCloud(
+        api_key=LLAMA_CLOUD_API_KEY,
+        timeout=httpx.Timeout(600.0, connect=60.0),
+    )
     results = {}
 
     for doc in docs:

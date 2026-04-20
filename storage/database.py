@@ -86,7 +86,6 @@ def init_db() -> None:
         );
 
         CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
-        CREATE INDEX IF NOT EXISTS idx_documents_doc_type ON documents(doc_type);
         CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
         CREATE INDEX IF NOT EXISTS idx_qa_doc ON qa_pairs(doc_id);
         CREATE INDEX IF NOT EXISTS idx_extraction_doc ON extraction_results(doc_id);
@@ -95,6 +94,12 @@ def init_db() -> None:
 
     # Migration: add columns if upgrading from old schema
     _migrate_columns(conn)
+
+    # Create indexes on migrated columns (must run after migration)
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_doc_type ON documents(doc_type)")
+    except sqlite3.OperationalError:
+        pass
     conn.close()
 
 
