@@ -4,6 +4,9 @@ Fix .tmp file extensions by detecting actual file type.
 Some files from the Google Drive have .tmp extensions even though
 they are PDFs, Word documents, Excel files, etc. This script detects
 the real type using file magic bytes and renames accordingly.
+
+Also handles ~WRL*.tmp files which are Word temporary/recovery files
+that contain actual document content.
 """
 
 import os
@@ -12,34 +15,6 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = PROJECT_ROOT / "data" / "raw"
-
-# File signature (magic bytes) → correct extension mapping
-SIGNATURES = [
-    # PDF
-    (b"%PDF", ".pdf"),
-    # Microsoft Office (new format — ZIP-based: docx, xlsx, pptx)
-    (b"PK\x03\x04", None),  # handled specially below
-    # Microsoft Office (old format — OLE2 Compound Document)
-    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", None),  # handled specially below
-    # PNG
-    (b"\x89PNG\r\n\x1a\n", ".png"),
-    # JPEG
-    (b"\xff\xd8\xff", ".jpg"),
-    # GIF
-    (b"GIF87a", ".gif"),
-    (b"GIF89a", ".gif"),
-    # TIFF
-    (b"II\x2a\x00", ".tiff"),
-    (b"MM\x00\x2a", ".tiff"),
-    # BMP
-    (b"BM", ".bmp"),
-    # RTF
-    (b"{\\rtf", ".rtf"),
-    # HTML
-    (b"<!DOCTYPE", ".html"),
-    (b"<html", ".html"),
-    (b"<HTML", ".html"),
-]
 
 
 def detect_file_type(filepath: Path) -> str | None:
@@ -50,35 +25,62 @@ def detect_file_type(filepath: Path) -> str | None:
     try:
         with open(filepath, "rb") as f:
             header = f.read(8192)
-    except (IOError, OSError):
+    except (IOError, OSError) as e:
+        print(f"    [error] Cannot read {filepath}: {e}")
         return None
 
     if not header or len(header) < 4:
+        print(f"    [warn] File too small ({len(header) if header else 0} bytes): {filepath.name}")
         return None
 
-    # Check PDF
+    # PDF
     if header[:4] == b"%PDF":
         return ".pdf"
 
-    # Check ZIP-based Office formats (docx, xlsx, pptx)
+    # ZIP-based Office formats (docx, xlsx, pptx)
     if header[:4] == b"PK\x03\x04":
         return _detect_office_zip(header)
 
-    # Check OLE2 (old .doc, .xls, .ppt)
+    # OLE2 Compound Document (old .doc, .xls, .ppt — also ~WRL*.tmp files)
     if header[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
         return _detect_ole2(filepath, header)
 
-    # Check other signatures
-    for sig, ext in SIGNATURES:
-        if ext and header[:len(sig)] == sig:
-            return ext
+    # PNG
+    if header[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+
+    # JPEG
+    if header[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+
+    # GIF
+    if header[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+
+    # TIFF
+    if header[:4] in (b"II\x2a\x00", b"MM\x00\x2a"):
+        return ".tiff"
+
+    # BMP
+    if header[:2] == b"BM" and len(header) > 14:
+        return ".bmp"
+
+    # RTF
+    if header[:5] == b"{\\rtf":
+        return ".rtf"
+
+    # HTML
+    lower_header = header[:256].lower()
+    if b"<!doctype" in lower_header or b"<html" in lower_header:
+        return ".html"
 
     # Try to detect plain text (UTF-8 / ASCII)
     try:
         text = header[:1024].decode("utf-8", errors="strict")
-        if text.isprintable() or "\n" in text or "\r" in text:
+        printable_ratio = sum(1 for c in text if c.isprintable() or c in "\n\r\t") / len(text)
+        if printable_ratio > 0.85:
             return ".txt"
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, ZeroDivisionError):
         pass
 
     return None
@@ -86,78 +88,80 @@ def detect_file_type(filepath: Path) -> str | None:
 
 def _detect_office_zip(header: bytes) -> str:
     """Detect which Office format a ZIP-based file is (docx/xlsx/pptx)."""
-    header_str = header[:8192]
+    h = header[:8192]
 
-    if b"word/" in header_str or b"word\\" in header_str:
+    if b"word/" in h or b"word\\" in h:
         return ".docx"
-    elif b"xl/" in header_str or b"xl\\" in header_str:
+    elif b"xl/" in h or b"xl\\" in h:
         return ".xlsx"
-    elif b"ppt/" in header_str or b"ppt\\" in header_str:
+    elif b"ppt/" in h or b"ppt\\" in h:
         return ".pptx"
-    else:
-        # Generic ZIP — check content types
-        if b"WordprocessingML" in header_str or b"wordprocessingml" in header_str:
-            return ".docx"
-        elif b"SpreadsheetML" in header_str or b"spreadsheetml" in header_str:
-            return ".xlsx"
-        elif b"PresentationML" in header_str or b"presentationml" in header_str:
-            return ".pptx"
-        return ".docx"  # default to docx for ambiguous ZIP Office files
+
+    if b"WordprocessingML" in h or b"wordprocessingml" in h:
+        return ".docx"
+    elif b"SpreadsheetML" in h or b"spreadsheetml" in h:
+        return ".xlsx"
+    elif b"PresentationML" in h or b"presentationml" in h:
+        return ".pptx"
+
+    return ".docx"
 
 
 def _detect_ole2(filepath: Path, header: bytes) -> str:
     """
     Detect which OLE2 format a file is (.doc, .xls, .ppt).
-    Uses heuristics based on the file content.
+    ~WRL*.tmp files are typically Word recovery files (OLE2).
     """
     try:
         with open(filepath, "rb") as f:
             content = f.read(min(65536, filepath.stat().st_size))
     except IOError:
-        return ".doc"  # default
-
-    content_str = content
-
-    if b"Microsoft Word" in content_str or b"W\x00o\x00r\x00d" in content_str:
         return ".doc"
-    elif b"Microsoft Excel" in content_str or b"Workbook" in content_str:
+
+    if b"Microsoft Word" in content or b"W\x00o\x00r\x00d" in content:
+        return ".doc"
+    elif b"Microsoft Excel" in content or b"Workbook" in content:
         return ".xls"
-    elif b"Microsoft PowerPoint" in content_str or b"P\x00o\x00w\x00e\x00r" in content_str:
+    elif b"Microsoft PowerPoint" in content or b"P\x00o\x00w\x00e\x00r" in content:
         return ".ppt"
-    elif b"Worksheet" in content_str or b"Sheet" in content_str:
+    elif b"Worksheet" in content or b"Sheet" in content:
         return ".xls"
-    else:
-        return ".doc"  # default for ambiguous OLE2
+
+    # ~WRL files are almost always Word documents
+    if filepath.stem.startswith("~WRL"):
+        return ".doc"
+
+    return ".doc"
 
 
-def fix_tmp_files(directory: Path | None = None) -> dict:
+def fix_tmp_files(directory: Path | str | None = None) -> dict:
     """
     Scan directory for .tmp files, detect real types, and rename them.
-
-    Returns dict with stats: {renamed: int, skipped: int, unknown: int, details: list}
+    Returns dict with stats.
     """
-    scan_dir = directory or RAW_DIR
+    scan_dir = Path(directory) if directory else RAW_DIR
     stats = {"renamed": 0, "skipped": 0, "unknown": 0, "details": []}
 
-    tmp_files = list(scan_dir.rglob("*.tmp")) + list(scan_dir.rglob("*.TMP"))
+    print(f"[fix-tmp] Scanning: {scan_dir}")
+
+    tmp_files = sorted(set(
+        list(scan_dir.rglob("*.tmp")) + list(scan_dir.rglob("*.TMP"))
+    ))
+
     if not tmp_files:
         print(f"[fix-tmp] No .tmp files found in {scan_dir}")
         return stats
 
     print(f"[fix-tmp] Found {len(tmp_files)} .tmp files to analyze\n")
 
-    for filepath in sorted(tmp_files):
+    for filepath in tmp_files:
+        rel = filepath.relative_to(scan_dir) if filepath.is_relative_to(scan_dir) else filepath
         real_ext = detect_file_type(filepath)
 
         if real_ext is None:
             stats["unknown"] += 1
-            rel = filepath.relative_to(scan_dir)
             stats["details"].append(f"  [unknown] {rel}")
-            print(f"  [unknown] {rel} — could not detect type")
-            continue
-
-        if real_ext == ".tmp":
-            stats["skipped"] += 1
+            print(f"  [unknown] {rel} -- could not detect type")
             continue
 
         new_path = filepath.with_suffix(real_ext)
@@ -172,9 +176,8 @@ def fix_tmp_files(directory: Path | None = None) -> dict:
 
         filepath.rename(new_path)
         stats["renamed"] += 1
-        rel_old = filepath.relative_to(scan_dir)
-        rel_new = new_path.relative_to(scan_dir)
-        detail = f"  [renamed] {rel_old} → {rel_new}"
+        new_rel = new_path.relative_to(scan_dir) if new_path.is_relative_to(scan_dir) else new_path
+        detail = f"  [renamed] {rel} -> {new_rel}"
         stats["details"].append(detail)
         print(detail)
 
@@ -190,4 +193,6 @@ def fix_tmp_files(directory: Path | None = None) -> dict:
 
 
 if __name__ == "__main__":
-    fix_tmp_files()
+    import sys
+    directory = sys.argv[1] if len(sys.argv) > 1 else None
+    fix_tmp_files(directory)

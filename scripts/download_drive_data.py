@@ -1,16 +1,15 @@
 """
 Download entire Google Drive folder recursively into data/raw/.
 
-Uses gdown to handle Google Drive's public sharing links.
-Supports nested subdirectories and preserves folder structure.
+Uses gdown Python API for reliable recursive downloads.
+Handles nested subdirectories and preserves folder structure.
 """
 
 import os
 import sys
-import subprocess
+import time
 from pathlib import Path
 
-# Google Drive folder ID from the shared link
 DRIVE_FOLDER_ID = "1dKqv9wTO7xxU4S7iYxchKB_t7vs3tAf5"
 DRIVE_URL = f"https://drive.google.com/drive/folders/{DRIVE_FOLDER_ID}"
 
@@ -20,51 +19,64 @@ RAW_DIR = PROJECT_ROOT / "data" / "raw"
 
 def download_drive_folder():
     """Download the complete Google Drive folder into data/raw/."""
+    import gdown
+
     RAW_DIR.mkdir(parents=True, exist_ok=True)
 
     print(f"[download] Target directory: {RAW_DIR}")
-    print(f"[download] Downloading from: {DRIVE_URL}")
+    print(f"[download] Drive folder ID: {DRIVE_FOLDER_ID}")
     print(f"[download] This may take a while for large folders...\n")
 
+    # Use gdown Python API — more reliable for nested folders
     try:
-        result = subprocess.run(
-            [
-                sys.executable, "-m", "gdown",
-                DRIVE_URL,
-                "-O", str(RAW_DIR),
-                "--folder",
-                "--remaining-ok",
-            ],
-            check=True,
-            capture_output=False,
+        gdown.download_folder(
+            url=DRIVE_URL,
+            output=str(RAW_DIR),
+            quiet=False,
+            remaining_ok=True,
         )
-        print(f"\n[download] ✓ Download complete!")
-    except subprocess.CalledProcessError as e:
-        print(f"\n[download] ✗ gdown CLI failed (exit {e.returncode}), trying Python API...")
-        _download_with_python_api()
+        print(f"\n[download] First pass complete.")
+    except Exception as e:
+        print(f"\n[download] Warning during download: {e}")
+        print("[download] Continuing with whatever was downloaded...")
 
+    # Check for subfolder IDs that gdown might have missed
+    _retry_failed_subfolders()
     _print_stats()
 
 
-def _download_with_python_api():
-    """Fallback: use gdown Python API for more control."""
+def _retry_failed_subfolders():
+    """
+    gdown sometimes skips deeply nested subfolders.
+    Scan for any .gdrive_folder_id marker files and retry.
+    """
     import gdown
 
-    print(f"[download] Using gdown Python API...")
-    gdown.download_folder(
-        url=DRIVE_URL,
-        output=str(RAW_DIR),
-        quiet=False,
-        remaining_ok=True,
-    )
-    print(f"[download] ✓ Download complete via Python API!")
+    marker_files = list(RAW_DIR.rglob("*.gdrive_folder_id"))
+    if not marker_files:
+        return
+
+    print(f"\n[download] Found {len(marker_files)} subfolder markers to retry...")
+    for marker in marker_files:
+        folder_id = marker.read_text().strip()
+        target_dir = marker.parent
+        print(f"  [retry] Downloading subfolder {folder_id} → {target_dir}")
+        try:
+            gdown.download_folder(
+                id=folder_id,
+                output=str(target_dir),
+                quiet=False,
+                remaining_ok=True,
+            )
+        except Exception as e:
+            print(f"  [warn] Failed to download subfolder: {e}")
 
 
 def _print_stats():
     """Print summary of downloaded files."""
-    all_files = list(RAW_DIR.rglob("*"))
-    files = [f for f in all_files if f.is_file()]
-    dirs = [f for f in all_files if f.is_dir()]
+    all_items = list(RAW_DIR.rglob("*"))
+    files = [f for f in all_items if f.is_file()]
+    dirs = [f for f in all_items if f.is_dir()]
 
     total_size = sum(f.stat().st_size for f in files)
     size_mb = total_size / (1024 * 1024)
@@ -76,7 +88,6 @@ def _print_stats():
     print(f"  Directories: {len(dirs)}")
     print(f"  Total size:  {size_mb:.1f} MB")
 
-    # Show extension distribution
     ext_counts = {}
     for f in files:
         ext = f.suffix.lower() or "(no extension)"
@@ -84,7 +95,7 @@ def _print_stats():
 
     print(f"  Extensions:")
     for ext, count in sorted(ext_counts.items(), key=lambda x: -x[1]):
-        print(f"    {ext:12s} → {count} files")
+        print(f"    {ext:12s} -> {count} files")
     print(f"{'=' * 50}\n")
 
 
