@@ -84,8 +84,8 @@ def _decide_schemas_for_doc(doc: dict) -> list[str]:
     doc_type = doc.get("doc_type", "").strip()
     if doc_type and doc_type in DOC_TYPE_SCHEMA_MAP:
         return DOC_TYPE_SCHEMA_MAP[doc_type]
-    # Default: extract project + indicator + beneficiary for all docs
-    return ["project", "indicator", "beneficiary"]
+    # Default: extract all major schemas for unclassified docs
+    return ["project", "indicator", "beneficiary", "logframe", "report"]
 
 
 async def _extract_single(client: AsyncLlamaCloud, md_path: str,
