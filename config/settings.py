@@ -121,7 +121,7 @@ CLASSIFY_RULES = [
     },
 ]
 
-# Extraction schema for SDG project documents
+# Extraction schema for SDG project documents (legacy/generic)
 EXTRACTION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -180,4 +180,272 @@ EXTRACTION_SCHEMA = {
         },
     },
     "required": ["project_name", "organization"],
+}
+
+# ────────────────────────────────────────────────────────────────────
+# Inpakt-Aligned Extraction Schemas (for training data generation)
+# These match the Prisma/Zod schemas from the Inpakt platform
+# ────────────────────────────────────────────────────────────────────
+
+TRAINING_DIR = DATA_DIR / "training"
+TRAINING_EXTRACTED_DIR = TRAINING_DIR / "extracted"
+TRAINING_FINETUNE_DIR = TRAINING_DIR / "fine_tuning"
+
+# Schema 1: Project Metadata
+INPAKT_PROJECT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "project_name": {
+            "type": "string",
+            "description": "Full name of the project or program (Arabic preferred)",
+        },
+        "project_name_en": {
+            "type": "string",
+            "description": "English translation of the project name",
+        },
+        "description": {
+            "type": "string",
+            "description": "Brief project description in Arabic (2-3 sentences about goals and scope)",
+        },
+        "description_en": {
+            "type": "string",
+            "description": "English translation of the project description",
+        },
+        "organization": {
+            "type": "string",
+            "description": "Implementing organization name",
+        },
+        "donor": {
+            "type": "string",
+            "description": "Funding organization or donor",
+        },
+        "sdg_goals": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "SDG goal numbers (1-17) this project addresses",
+        },
+        "location": {
+            "type": "string",
+            "description": "Geographic location (governorate, city, country)",
+        },
+        "sector": {
+            "type": "string",
+            "description": "Primary sector: health, education, disability, livelihoods, water, protection, etc.",
+        },
+        "budget": {
+            "type": "number",
+            "description": "Total project budget amount (numeric)",
+        },
+        "currency": {
+            "type": "string",
+            "description": "Budget currency code (EGP, USD, EUR, etc.)",
+        },
+        "start_date": {
+            "type": "string",
+            "description": "Project start date (YYYY-MM or YYYY-MM-DD)",
+        },
+        "end_date": {
+            "type": "string",
+            "description": "Project end date (YYYY-MM or YYYY-MM-DD)",
+        },
+        "reporting_period": {
+            "type": "string",
+            "description": "Time period covered by this document",
+        },
+        "target_beneficiaries_count": {
+            "type": "integer",
+            "description": "Total target number of direct beneficiaries",
+        },
+    },
+    "required": ["project_name"],
+}
+
+# Schema 2: Beneficiary Data
+INPAKT_BENEFICIARY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "beneficiary_groups": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "group_name": {"type": "string", "description": "Name of beneficiary group (e.g., أطفال ذوي إعاقة)"},
+                    "group_name_en": {"type": "string", "description": "English name of the group"},
+                    "count": {"type": "integer", "description": "Number of beneficiaries in this group"},
+                    "category": {"type": "string", "description": "Category: Gender, Age, Disability, Region, Vulnerability"},
+                    "location": {"type": "string", "description": "Geographic location of this group"},
+                    "sdgs": {"type": "array", "items": {"type": "integer"}, "description": "Related SDG numbers"},
+                    "demographics": {
+                        "type": "object",
+                        "properties": {
+                            "male_count": {"type": "integer"},
+                            "female_count": {"type": "integer"},
+                            "children_count": {"type": "integer", "description": "Age 0-18"},
+                            "adult_count": {"type": "integer", "description": "Age 18-65"},
+                            "elderly_count": {"type": "integer", "description": "Age 65+"},
+                            "disability_types": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                },
+            },
+            "description": "All beneficiary groups mentioned in the document",
+        },
+        "total_beneficiaries": {
+            "type": "integer",
+            "description": "Total number of direct beneficiaries across all groups",
+        },
+        "total_indirect_beneficiaries": {
+            "type": "integer",
+            "description": "Total number of indirect beneficiaries (e.g., families)",
+        },
+    },
+}
+
+# Schema 3: Indicators / KPIs
+INPAKT_INDICATOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "indicators": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Indicator name in Arabic"},
+                    "name_en": {"type": "string", "description": "Indicator name in English"},
+                    "description": {"type": "string", "description": "What this indicator measures (Arabic)"},
+                    "description_en": {"type": "string", "description": "What this indicator measures (English)"},
+                    "type": {"type": "string", "description": "numeric, percentage, qualitative, or text"},
+                    "target_value": {"type": "string", "description": "Target value (e.g., '95%', '500')"},
+                    "actual_value": {"type": "string", "description": "Achieved value if mentioned"},
+                    "unit": {"type": "string", "description": "Measurement unit (e.g., '%', 'beneficiaries', 'sessions')"},
+                    "source_library": {"type": "string", "description": "sdg, iris, esg, or custom"},
+                    "indicator_code": {"type": "string", "description": "SDG indicator code if applicable (e.g., 3.8.1)"},
+                    "rationale": {"type": "string", "description": "Why this indicator is relevant (Arabic)"},
+                    "rationale_en": {"type": "string", "description": "Why this indicator is relevant (English)"},
+                    "relevance_score": {"type": "integer", "description": "0-100 relevance to project goals"},
+                },
+            },
+            "description": "All measurable indicators, KPIs, or metrics found in the document",
+        },
+    },
+}
+
+# Schema 4: Logical Framework
+INPAKT_LOGFRAME_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "logframe_items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "description": "Goal, Outcome, Output, or Activity"},
+                    "name": {"type": "string", "description": "Item name in Arabic"},
+                    "name_en": {"type": "string", "description": "Item name in English"},
+                    "description": {"type": "string", "description": "Description in Arabic"},
+                    "description_en": {"type": "string", "description": "Description in English"},
+                    "assumptions": {"type": "string", "description": "Key assumptions for this item"},
+                    "means_of_verification": {"type": "string", "description": "How achievement is verified"},
+                    "parent_ref": {"type": "string", "description": "Name of parent logframe item (empty for Goal)"},
+                },
+            },
+            "description": "Hierarchical logframe: Goal -> Outcomes -> Outputs -> Activities",
+        },
+    },
+}
+
+# Schema 5: Financial Data
+INPAKT_FINANCIAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "budget_total": {"type": "number", "description": "Total project budget"},
+        "currency": {"type": "string", "description": "Currency code (EGP, USD, etc.)"},
+        "expenses": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "Expense category (Staff, Supplies, Travel, Training, etc.)"},
+                    "description": {"type": "string", "description": "Description of expense"},
+                    "amount": {"type": "number", "description": "Amount spent"},
+                    "period": {"type": "string", "description": "Time period of expense"},
+                },
+            },
+        },
+        "income_sources": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string", "description": "Funding source name"},
+                    "amount": {"type": "number", "description": "Amount received"},
+                    "type": {"type": "string", "description": "Grant, Donor, Government, etc."},
+                },
+            },
+        },
+        "burn_rate": {"type": "number", "description": "Monthly spending rate if available"},
+    },
+}
+
+# Schema 6: Survey Structure
+INPAKT_SURVEY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "survey_title": {"type": "string", "description": "Survey title in Arabic"},
+        "survey_title_en": {"type": "string", "description": "Survey title in English"},
+        "survey_description": {"type": "string", "description": "Purpose of the survey"},
+        "focus_area": {"type": "string", "description": "impact, satisfaction, baseline, endline, demographics, or general"},
+        "methodology": {"type": "string", "description": "Survey methodology described"},
+        "sample_size": {"type": "integer", "description": "Number of respondents"},
+        "questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question_text": {"type": "string", "description": "Question in Arabic"},
+                    "question_text_en": {"type": "string", "description": "Question in English"},
+                    "question_type": {"type": "string", "description": "text, numeric, multiple_choice, checkbox, yes_no, rating, likert_scale, date"},
+                    "options": {"type": "array", "items": {"type": "string"}, "description": "Answer options in Arabic (for MC/checkbox)"},
+                    "options_en": {"type": "array", "items": {"type": "string"}, "description": "Answer options in English"},
+                    "is_required": {"type": "boolean"},
+                    "hint": {"type": "string", "description": "Help text for respondent (Arabic)"},
+                    "hint_en": {"type": "string", "description": "Help text in English"},
+                },
+            },
+        },
+        "response_summaries": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "summary": {"type": "string", "description": "Aggregated response summary"},
+                    "key_finding": {"type": "string", "description": "Main insight from responses"},
+                },
+            },
+            "description": "Summary of survey responses if the document contains analysis",
+        },
+    },
+}
+
+# Map doc_type to the best extraction schemas
+DOC_TYPE_SCHEMA_MAP = {
+    "monthly_report": ["project", "beneficiary", "indicator", "logframe"],
+    "annual_report": ["project", "beneficiary", "indicator", "logframe", "financial"],
+    "financial_data": ["project", "financial"],
+    "survey_evaluation": ["project", "survey", "indicator"],
+    "database_tracking": ["project", "beneficiary", "indicator"],
+    "presentation": ["project", "logframe"],
+    "contract_agreement": ["project", "financial"],
+    "photo_documentation": ["project"],
+}
+
+# All Inpakt schemas keyed by name
+INPAKT_SCHEMAS = {
+    "project": INPAKT_PROJECT_SCHEMA,
+    "beneficiary": INPAKT_BENEFICIARY_SCHEMA,
+    "indicator": INPAKT_INDICATOR_SCHEMA,
+    "logframe": INPAKT_LOGFRAME_SCHEMA,
+    "financial": INPAKT_FINANCIAL_SCHEMA,
+    "survey": INPAKT_SURVEY_SCHEMA,
 }

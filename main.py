@@ -1,14 +1,15 @@
 """
 Kayan SDG Data Pipeline — CLI Orchestrator
 ============================================
-Full pipeline: Ingest -> Classify -> Parse/Sheets -> Extract -> Chunk -> QA -> Embed -> Export
+Full pipeline: Ingest -> Parse -> Classify -> Extract -> Chunk -> QA -> Embed -> Export
 
 Usage:
-    python main.py run                    # Run full pipeline
+    python main.py run                    # Run full pipeline (all stages)
     python main.py ingest [--source DIR]  # Ingest files only
-    python main.py classify               # Classify ingested docs by type
-    python main.py parse                  # Classify + Parse + Sheets + Extract
+    python main.py parse                  # Parse only (convert docs to markdown)
+    python main.py classify               # Classify parsed docs by type
     python main.py extract                # Extract structured data from parsed docs
+    python main.py parse-all              # Full: Classify + Parse + Sheets + Extract
     python main.py chunk                  # Chunk parsed docs
     python main.py qa                     # Generate QA pairs
     python main.py embed                  # Generate embeddings + FAISS
@@ -16,6 +17,11 @@ Usage:
     python main.py status                 # Show pipeline stats
     python main.py search "query"         # Test RAG search
     python main.py reparse                # Retry errored documents
+
+Training data commands:
+    python main.py extract-training [--schema NAME]   # Extract Inpakt-aligned data
+    python main.py generate-training                  # Generate fine-tuning JSONL
+    python main.py training-stats                     # Show training data statistics
 """
 
 import sys
@@ -73,6 +79,9 @@ def cmd_ingest(source_dir=None, copy=False):
 
 def cmd_classify():
     from parsing.parser import classify_only
+    if not LLAMA_CLOUD_API_KEY:
+        print("Error: Set LLAMA_CLOUD_API_KEY in .env file")
+        sys.exit(1)
     init_db()
     count = classify_only()
     print(f"\n-> Classified {count} documents")
@@ -80,6 +89,18 @@ def cmd_classify():
 
 
 def cmd_parse():
+    from parsing.parser import parse_only
+    if not LLAMA_CLOUD_API_KEY:
+        print("Error: Set LLAMA_CLOUD_API_KEY in .env file")
+        print("  Get one at: https://cloud.llamaindex.ai")
+        sys.exit(1)
+    init_db()
+    count = parse_only()
+    print(f"\n-> Parsed {count} documents (parse only)")
+    return count
+
+
+def cmd_parse_all():
     from parsing.parser import parse_documents
     if not LLAMA_CLOUD_API_KEY:
         print("Error: Set LLAMA_CLOUD_API_KEY in .env file")
@@ -158,6 +179,53 @@ def cmd_search(query, top_k=5):
         print()
 
 
+def cmd_extract_training(schema=None, concurrency=3):
+    from transformation.training_extractor import extract_training_data
+    if not LLAMA_CLOUD_API_KEY:
+        print("Error: Set LLAMA_CLOUD_API_KEY in .env file")
+        sys.exit(1)
+    init_db()
+    stats = extract_training_data(schema_filter=schema, concurrency=concurrency)
+    print("\n-> Extraction results:")
+    for name, count in stats.items():
+        print(f"   {name}: {count} documents")
+    return stats
+
+
+def cmd_generate_training():
+    from transformation.training_generator import generate_all_training
+    stats = generate_all_training()
+    print("\n-> Training data generated:")
+    for name, count in stats.items():
+        print(f"   {name}: {count} examples")
+    return stats
+
+
+def cmd_training_stats():
+    from transformation.training_generator import get_training_stats
+    from transformation.training_extractor import get_extraction_stats
+    print("\n" + "=" * 55)
+    print("  TRAINING DATA STATISTICS")
+    print("=" * 55)
+
+    ext_stats = get_extraction_stats()
+    if ext_stats:
+        print("\n  Extracted Data (data/training/extracted/):")
+        for name, info in ext_stats.items():
+            print(f"    {name:20s} {info['files']:4d} files  ({info['total_size_mb']:.1f} MB)")
+
+    tr_stats = get_training_stats()
+    if tr_stats.get("fine_tuning"):
+        print("\n  Fine-Tuning Datasets (data/training/fine_tuning/):")
+        for name, info in tr_stats["fine_tuning"].items():
+            print(f"    {name:30s} {info['examples']:4d} examples  ({info['size_mb']:.1f} MB)")
+
+    totals = tr_stats.get("totals", {})
+    print(f"\n  Total extracted files:    {totals.get('extracted_files', 0)}")
+    print(f"  Total training examples:  {totals.get('training_examples', 0)}")
+    print("=" * 55 + "\n")
+
+
 def cmd_run(source_dir=None):
     """Run the full pipeline end-to-end."""
     print("\n" + "=" * 55)
@@ -226,15 +294,31 @@ def main():
     p_ingest.add_argument("--copy", action="store_true", help="Copy files to data/raw")
 
     # individual stages
-    sub.add_parser("classify", help="Classify ingested documents by type")
-    sub.add_parser("parse", help="Full processing: Classify + Parse/Sheets + Extract")
-    sub.add_parser("extract", help="Extract structured data from parsed documents")
+    sub.add_parser("parse", help="Parse only: convert ingested docs to markdown")
+    sub.add_parser("classify", help="Classify already-parsed documents by type")
+    sub.add_parser("extract", help="Extract structured SDG data from parsed documents")
+    sub.add_parser("parse-all", help="Full processing: Classify + Parse/Sheets + Extract")
     sub.add_parser("chunk", help="Chunk parsed documents for RAG")
     sub.add_parser("qa", help="Generate QA pairs for fine-tuning")
     sub.add_parser("embed", help="Generate embeddings + build FAISS index")
     sub.add_parser("export", help="Export training data (JSONL + RAG bundle)")
     sub.add_parser("status", help="Show pipeline statistics")
     sub.add_parser("reparse", help="Retry processing errored documents")
+
+    # Training data commands
+    p_extract_tr = sub.add_parser("extract-training",
+                                   help="Extract Inpakt-aligned training data from parsed docs")
+    p_extract_tr.add_argument("--schema",
+                              choices=["project", "beneficiary", "indicator",
+                                       "logframe", "financial", "survey"],
+                              help="Extract only this schema (default: all)")
+    p_extract_tr.add_argument("--concurrency", type=int, default=3,
+                              help="Max concurrent API calls (default: 3)")
+
+    sub.add_parser("generate-training",
+                   help="Generate fine-tuning JSONL from extracted data")
+    sub.add_parser("training-stats",
+                   help="Show training data statistics")
 
     # search
     p_search = sub.add_parser("search", help="Test RAG search")
@@ -248,18 +332,25 @@ def main():
         sys.exit(0)
 
     commands = {
-        "run":      lambda: cmd_run(source_dir=args.source if hasattr(args, 'source') else None),
-        "ingest":   lambda: cmd_ingest(source_dir=args.source, copy=args.copy),
-        "classify": cmd_classify,
-        "parse":    cmd_parse,
-        "extract":  cmd_extract,
-        "chunk":    cmd_chunk,
-        "qa":       cmd_qa,
-        "embed":    cmd_embed,
-        "export":   cmd_export,
-        "status":   cmd_status,
-        "reparse":  cmd_reparse,
-        "search":   lambda: cmd_search(args.query, top_k=args.k),
+        "run":       lambda: cmd_run(source_dir=args.source if hasattr(args, 'source') else None),
+        "ingest":    lambda: cmd_ingest(source_dir=args.source, copy=args.copy),
+        "parse":     cmd_parse,
+        "classify":  cmd_classify,
+        "extract":   cmd_extract,
+        "parse-all": cmd_parse_all,
+        "chunk":     cmd_chunk,
+        "qa":        cmd_qa,
+        "embed":     cmd_embed,
+        "export":    cmd_export,
+        "status":    cmd_status,
+        "reparse":   cmd_reparse,
+        "extract-training": lambda: cmd_extract_training(
+            schema=args.schema if hasattr(args, 'schema') else None,
+            concurrency=args.concurrency if hasattr(args, 'concurrency') else 3,
+        ),
+        "generate-training": cmd_generate_training,
+        "training-stats": cmd_training_stats,
+        "search":    lambda: cmd_search(args.query, top_k=args.k),
     }
 
     commands[args.command]()
