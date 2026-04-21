@@ -143,24 +143,28 @@ async def _extract_batch_for_schema(docs: list[dict], schema_name: str,
         print(f"  [{schema_name}] All {len(docs)} docs already extracted, skipping")
         return 0
 
-    print(f"  [{schema_name}] Extracting {len(pending)} docs ({len(already_done)} already done)")
+    total = len(pending)
+    print(f"  [{schema_name}] Extracting {total} docs ({len(already_done)} already done)")
     client = _make_client()
     extracted = 0
     errors = 0
+    processed = 0
 
-    # Process with simple concurrency using semaphore
     sem = asyncio.Semaphore(concurrency)
 
     async def process_one(doc):
-        nonlocal extracted, errors
+        nonlocal extracted, errors, processed
         async with sem:
+            fname = Path(doc["filename"]).stem[:50]
             data = await _extract_single(client, doc["parsed_path"], schema)
+            processed += 1
             if data and _has_meaningful_data(data):
                 _save_extraction(doc["id"], schema_name, data, doc["filename"])
                 extracted += 1
+                print(f"    [{schema_name}] ({processed}/{total}) #{doc['id']} {fname} -> OK", flush=True)
             else:
                 errors += 1
-            # Rate limit: small delay between requests
+                print(f"    [{schema_name}] ({processed}/{total}) #{doc['id']} {fname} -> empty", flush=True)
             await asyncio.sleep(1.0)
 
     tasks = [process_one(doc) for doc in pending]
