@@ -310,7 +310,7 @@ def main():
                                    help="Extract Inpakt-aligned training data from parsed docs")
     p_extract_tr.add_argument("--schema",
                               choices=["project", "beneficiary", "indicator",
-                                       "logframe", "financial", "survey"],
+                                       "logframe", "financial", "survey", "report"],
                               help="Extract only this schema (default: all)")
     p_extract_tr.add_argument("--concurrency", type=int, default=3,
                               help="Max concurrent API calls (default: 3)")

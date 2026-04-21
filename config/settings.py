@@ -428,12 +428,147 @@ INPAKT_SURVEY_SCHEMA = {
     },
 }
 
+# Schema 7: Report Structure (for generating professional NGO reports)
+INPAKT_REPORT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "report_title": {
+            "type": "string",
+            "description": "Report title in Arabic",
+        },
+        "report_title_en": {
+            "type": "string",
+            "description": "Report title in English",
+        },
+        "report_type": {
+            "type": "string",
+            "description": "monthly, quarterly, annual, impact, evaluation, or narrative",
+        },
+        "reporting_period": {
+            "type": "string",
+            "description": "Period covered (e.g., 'أغسطس 2023', 'الربع الأول 2024', '2023 السنوي')",
+        },
+        "executive_summary": {
+            "type": "string",
+            "description": "Brief executive summary of the report in Arabic (3-5 sentences)",
+        },
+        "executive_summary_en": {
+            "type": "string",
+            "description": "Executive summary in English",
+        },
+        "key_achievements": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "achievement": {"type": "string", "description": "Achievement description in Arabic"},
+                    "achievement_en": {"type": "string", "description": "Achievement in English"},
+                    "metric_value": {"type": "string", "description": "Quantitative value if available (e.g., '150 مستفيد')"},
+                    "related_indicator": {"type": "string", "description": "Related KPI or indicator name"},
+                },
+            },
+            "description": "Main achievements and results reported",
+        },
+        "activities_summary": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "activity_name": {"type": "string", "description": "Activity name in Arabic"},
+                    "activity_name_en": {"type": "string", "description": "Activity name in English"},
+                    "description": {"type": "string", "description": "What was done"},
+                    "beneficiaries_reached": {"type": "integer", "description": "Number of beneficiaries reached"},
+                    "status": {"type": "string", "description": "completed, in_progress, delayed, planned"},
+                    "location": {"type": "string", "description": "Where the activity took place"},
+                },
+            },
+            "description": "Summary of activities carried out during the reporting period",
+        },
+        "beneficiary_statistics": {
+            "type": "object",
+            "properties": {
+                "total_served": {"type": "integer", "description": "Total beneficiaries served this period"},
+                "new_beneficiaries": {"type": "integer", "description": "New beneficiaries added this period"},
+                "male_count": {"type": "integer"},
+                "female_count": {"type": "integer"},
+                "children_count": {"type": "integer"},
+                "services_delivered": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "service_type": {"type": "string", "description": "Type of service (e.g., جلسات تأهيل, زيارات منزلية)"},
+                            "service_type_en": {"type": "string"},
+                            "count": {"type": "integer", "description": "Number of service sessions/visits"},
+                        },
+                    },
+                },
+            },
+            "description": "Quantitative beneficiary and service delivery statistics",
+        },
+        "challenges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "challenge": {"type": "string", "description": "Challenge description in Arabic"},
+                    "challenge_en": {"type": "string", "description": "Challenge in English"},
+                    "mitigation": {"type": "string", "description": "How it was addressed or planned mitigation"},
+                    "severity": {"type": "string", "description": "high, medium, or low"},
+                },
+            },
+            "description": "Challenges and risks encountered",
+        },
+        "recommendations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "recommendation": {"type": "string", "description": "Recommendation in Arabic"},
+                    "recommendation_en": {"type": "string", "description": "Recommendation in English"},
+                    "priority": {"type": "string", "description": "high, medium, or low"},
+                    "target_audience": {"type": "string", "description": "Who should act on this"},
+                },
+            },
+            "description": "Recommendations for next period or stakeholders",
+        },
+        "lessons_learned": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Key lessons learned during this reporting period (Arabic)",
+        },
+        "next_period_plan": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "planned_activity": {"type": "string", "description": "Planned activity in Arabic"},
+                    "planned_activity_en": {"type": "string", "description": "Planned activity in English"},
+                    "target": {"type": "string", "description": "Target metric or deliverable"},
+                },
+            },
+            "description": "Plans and targets for the next reporting period",
+        },
+        "sdg_alignment": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "sdg_number": {"type": "integer", "description": "SDG goal number (1-17)"},
+                    "contribution": {"type": "string", "description": "How this report period contributed to this SDG"},
+                },
+            },
+            "description": "How reported activities align with SDG goals",
+        },
+    },
+}
+
 # Map doc_type to the best extraction schemas
 DOC_TYPE_SCHEMA_MAP = {
-    "monthly_report": ["project", "beneficiary", "indicator", "logframe"],
-    "annual_report": ["project", "beneficiary", "indicator", "logframe", "financial"],
-    "financial_data": ["project", "financial"],
-    "survey_evaluation": ["project", "survey", "indicator"],
+    "monthly_report": ["project", "beneficiary", "indicator", "logframe", "report"],
+    "annual_report": ["project", "beneficiary", "indicator", "logframe", "financial", "report"],
+    "financial_data": ["project", "financial", "report"],
+    "survey_evaluation": ["project", "survey", "indicator", "report"],
     "database_tracking": ["project", "beneficiary", "indicator"],
     "presentation": ["project", "logframe"],
     "contract_agreement": ["project", "financial"],
@@ -448,4 +583,5 @@ INPAKT_SCHEMAS = {
     "logframe": INPAKT_LOGFRAME_SCHEMA,
     "financial": INPAKT_FINANCIAL_SCHEMA,
     "survey": INPAKT_SURVEY_SCHEMA,
+    "report": INPAKT_REPORT_SCHEMA,
 }

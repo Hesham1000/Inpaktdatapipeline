@@ -430,10 +430,11 @@ def generate_survey_training() -> int:
 def generate_report_training() -> int:
     """Generate JSONL for report narrative generation fine-tuning.
 
-    Uses the parsed markdown itself as the 'assistant' response (ground truth narrative),
-    with project context as the 'user' prompt.
+    Uses extracted report structure (achievements, activities, challenges, recommendations)
+    combined with the original parsed markdown as ground truth narrative.
     """
     projects = _load_extracted("project")
+    reports = _load_extracted("report")
     indicators = _load_extracted("indicator")
     beneficiaries = _load_extracted("beneficiary")
 
@@ -441,6 +442,7 @@ def generate_report_training() -> int:
         print("  [report-training] No project data found")
         return 0
 
+    rep_by_id = {d["_doc_id"]: d for d in reports}
     ind_by_id = {d["_doc_id"]: d for d in indicators}
     ben_by_id = {d["_doc_id"]: d for d in beneficiaries}
 
@@ -451,20 +453,12 @@ def generate_report_training() -> int:
     with open(output_path, "w", encoding="utf-8") as f:
         for proj in projects:
             doc_id = proj["_doc_id"]
-            period = proj.get("reporting_period", "")
-            if not period:
-                continue
+            report_data = rep_by_id.get(doc_id, {})
+            period = report_data.get("reporting_period") or proj.get("reporting_period", "")
 
             # Read the original parsed markdown as the ground truth narrative
-            source = proj.get("_source_file", "")
-            md_stem = source.replace(".json", "")
-            md_path = PARSED_DIR / f"{md_stem}.md" if md_stem else None
-
-            # Try to find parsed file by doc_id
-            if not md_path or not md_path.exists():
-                parsed_files = list(PARSED_DIR.glob(f"{doc_id}_*.md"))
-                md_path = parsed_files[0] if parsed_files else None
-
+            parsed_files = list(PARSED_DIR.glob(f"{doc_id}_*.md"))
+            md_path = parsed_files[0] if parsed_files else None
             if not md_path or not md_path.exists():
                 continue
 
@@ -472,7 +466,6 @@ def generate_report_training() -> int:
             if len(narrative) < 200:
                 continue
 
-            # Truncate very long narratives to keep training examples manageable
             if len(narrative) > 15000:
                 narrative = narrative[:15000] + "\n\n[... Report continues ...]"
 
@@ -480,10 +473,19 @@ def generate_report_training() -> int:
             ben_data = ben_by_id.get(doc_id)
             context = _build_project_context(proj, ben_data, ind_data)
 
+            # Enrich context with structured report data if available
+            report_context = ""
+            if report_data:
+                report_context = _build_report_context(report_data)
+
+            report_type = report_data.get("report_type", "monthly")
             user_prompt = (
-                f"{context}\n\n"
-                f"Generate a {period} report narrative for this project.\n"
-                f"Include key achievements, beneficiary data, challenges, and recommendations.\n"
+                f"{context}\n"
+                f"{report_context}\n\n"
+                f"Generate a {report_type} report for period: {period}.\n"
+                f"Include: executive summary, key achievements with metrics, "
+                f"activities summary, beneficiary statistics, challenges with mitigations, "
+                f"recommendations, and plans for next period.\n"
                 f"Language: Arabic (with English summary)\n"
                 f"Format: Professional NGO project report"
             )
@@ -499,8 +501,108 @@ def generate_report_training() -> int:
             f.write(json.dumps(example, ensure_ascii=False) + "\n")
             count += 1
 
+            # If we have structured report data, also generate a structured report example
+            if report_data and _has_report_structure(report_data):
+                structured_example = _build_structured_report_example(
+                    context, report_data, period, report_type
+                )
+                if structured_example:
+                    f.write(json.dumps(structured_example, ensure_ascii=False) + "\n")
+                    count += 1
+
     print(f"  [report-training] Generated {count} examples -> {output_path.name}")
     return count
+
+
+def _build_report_context(report_data: dict) -> str:
+    """Build additional context from structured report extraction."""
+    lines = []
+
+    exec_summary = report_data.get("executive_summary", "")
+    if exec_summary:
+        lines.append(f"\n## Report Summary\n{exec_summary}")
+
+    achievements = report_data.get("key_achievements", [])
+    if achievements:
+        lines.append("\n## Key Achievements")
+        for a in achievements:
+            ach = a.get("achievement", "")
+            metric = a.get("metric_value", "")
+            lines.append(f"- {ach}" + (f" ({metric})" if metric else ""))
+
+    ben_stats = report_data.get("beneficiary_statistics", {})
+    if ben_stats:
+        total = ben_stats.get("total_served", 0)
+        if total:
+            lines.append(f"\n## Beneficiary Statistics (this period)")
+            lines.append(f"- Total served: {total}")
+            new = ben_stats.get("new_beneficiaries", 0)
+            if new:
+                lines.append(f"- New beneficiaries: {new}")
+            services = ben_stats.get("services_delivered", [])
+            for svc in services:
+                stype = svc.get("service_type", "")
+                scount = svc.get("count", 0)
+                if stype:
+                    lines.append(f"- {stype}: {scount}")
+
+    challenges = report_data.get("challenges", [])
+    if challenges:
+        lines.append("\n## Challenges")
+        for c in challenges:
+            ch = c.get("challenge", "")
+            sev = c.get("severity", "")
+            lines.append(f"- [{sev}] {ch}" if sev else f"- {ch}")
+
+    return "\n".join(lines) if lines else ""
+
+
+def _has_report_structure(report_data: dict) -> bool:
+    """Check if report extraction has enough structured data for a standalone example."""
+    has_achievements = bool(report_data.get("key_achievements"))
+    has_activities = bool(report_data.get("activities_summary"))
+    has_challenges = bool(report_data.get("challenges"))
+    return sum([has_achievements, has_activities, has_challenges]) >= 2
+
+
+def _build_structured_report_example(context: str, report_data: dict,
+                                      period: str, report_type: str) -> dict | None:
+    """Build a training example where the assistant returns structured report JSON."""
+    structured_system = (
+        REPORT_SYSTEM_PROMPT + "\n\n"
+        "Return the report as structured JSON with these sections:\n"
+        "- report_title, report_title_en\n"
+        "- report_type (monthly/quarterly/annual/impact)\n"
+        "- executive_summary, executive_summary_en\n"
+        "- key_achievements: [{achievement, achievement_en, metric_value}]\n"
+        "- activities_summary: [{activity_name, activity_name_en, beneficiaries_reached, status}]\n"
+        "- beneficiary_statistics: {total_served, services_delivered: [{service_type, count}]}\n"
+        "- challenges: [{challenge, challenge_en, mitigation, severity}]\n"
+        "- recommendations: [{recommendation, recommendation_en, priority}]\n"
+        "- next_period_plan: [{planned_activity, planned_activity_en, target}]"
+    )
+
+    user_prompt = (
+        f"{context}\n\n"
+        f"Generate a structured {report_type} report for period: {period}.\n"
+        f"Return as JSON with all sections filled.\n"
+        f"Language: Bilingual (Arabic + English)"
+    )
+
+    # Clean report data for output (remove internal fields)
+    output = {k: v for k, v in report_data.items()
+              if not k.startswith("_") and v}
+
+    if not output:
+        return None
+
+    return {
+        "messages": [
+            {"role": "system", "content": structured_system},
+            {"role": "user", "content": user_prompt},
+            {"role": "assistant", "content": json.dumps(output, ensure_ascii=False)},
+        ]
+    }
 
 
 def generate_all_training() -> dict:
